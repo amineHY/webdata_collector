@@ -2,18 +2,22 @@
 import datetime
 import logging
 import os
+import random
 import time
 import urllib
 import urllib.parse
 from urllib.parse import urlparse
+
 import pandas as pd
 import uvicorn
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from fake_useragent import UserAgent
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Playwright
 from rich import print
+
 from config import cities
 
 # Create an instance of the FastAPI class.
@@ -206,8 +210,26 @@ def crawle_facebook_marketplace(headless_param, url_login, url_marketplace, p):
     logger.info("Launching browser")
 
     browser = p.webkit.launch(headless=headless_param)
-    context = browser.new_context()
+
+    # Set the viewport size to a random width and height between 800x600 and 1600x1200
+    viewport_width = random.randint(800, 1600)
+    viewport_height = random.randint(600, 1200)
+    
+    # Set a fake user agent to avoid being blocked
+    ua = UserAgent()
+    user_agent = ua.random
+
+    # Define a browser context with the specified viewport size and user agent
+    context = browser.new_context(
+        user_agent=user_agent,
+        # locale='fr-FR',
+        # timezone_id='Europe/Paris',
+        viewport={"width": viewport_width, "height": viewport_height}
+        )
     page = context.new_page()
+
+
+    page.route("**/*.{png,jpg,jpeg}", lambda route: route.abort())
 
     logger.info(f"Navigating to login page: {url_login}")
     page.goto(url_login)
@@ -217,8 +239,10 @@ def crawle_facebook_marketplace(headless_param, url_login, url_marketplace, p):
     assert "Facebook" in page.title()
 
     # Check if the cookie popup is visible and click the accept button
-    time.sleep(2)
     handle_cookies_popup(page, button_txt = 'Allow all cookies')
+
+    # Wait for some time after handling cookies
+    page.wait_for_timeout(random.uniform(2000, 5000))
 
     logger.info("Filling login form")
     page.wait_for_selector('input[name="email"]').fill(email)
@@ -282,6 +306,21 @@ def features_engineering(filepath):
     df = df.sort_values("price_reduction_pct", ascending=False)
     return df
 
+def setup_urls_facebook_marketplace(query_param, max_price_param, item_condition_param, city):
+    url_facebook = "https://www.facebook.com"
+    url_login = url_facebook + "/login/device-based/regular/login/"
+
+    base_url_marketplace = f"{url_facebook}/marketplace/{city}/search/"
+    query_params = {
+        "query": query_param,
+        "maxPrice": max_price_param,
+        "itemCondition": item_condition_param,
+        "exact": "true",
+    }
+    encoded_query_params = urllib.parse.urlencode(query_params)
+    url_marketplace = f"{base_url_marketplace}?{encoded_query_params}"
+    return url_login,url_marketplace
+
 def run_facebook_marketplace_crawler_and_parser(
     city_param,
     query_param,
@@ -317,27 +356,20 @@ def run_facebook_marketplace_crawler_and_parser(
     else:
         raise ValueError(f"{city_param} is not supported.")
 
-    url_facebook = "https://www.facebook.com"
-    url_login = url_facebook + "/login/device-based/regular/login/"
-
-    base_url_marketplace = f"{url_facebook}/marketplace/{city}/search/"
-    query_params = {
-        "query": query_param,
-        "maxPrice": max_price_param,
-        "itemCondition": item_condition_param,
-        "exact": "true",
-    }
-    encoded_query_params = urllib.parse.urlencode(query_params)
-    url_marketplace = f"{base_url_marketplace}?{encoded_query_params}"
+    url_login, url_marketplace = setup_urls_facebook_marketplace(query_param, max_price_param, item_condition_param, city)
 
     with sync_playwright() as p:
+
         browser, page, html = crawle_facebook_marketplace(headless_param, url_login, url_marketplace, p)
         df = parse_facebook_marketplace_listings(html)
-        time.sleep(3)
+        time.sleep(2)
         df = parse_facebook_marketplace_post_metadata(page, df)
+
+        # Close the browser
         browser.close()
 
         return df
+
 
 
 @app.get("/")
@@ -386,6 +418,7 @@ def main(city, query, max_price, headless=True, item_condition='used_like_new'):
         item_condition_param=item_condition,
         headless_param=headless,
     )
+    # wrap up
     if df_crawler is not None:
         if print_data:
             logger.info("Print results")
@@ -398,7 +431,6 @@ def main(city, query, max_price, headless=True, item_condition='used_like_new'):
             df_crawler.to_csv(filepath, index=False)
             df_crawler = features_engineering(filepath)
             df_crawler.to_csv(filepath[:-4] + "_cleaned.csv", index=False)
-
 
         end_time = time.time()
         logger.info(f"Elapsed time: {round(end_time - start_time, 2)} seconds")
