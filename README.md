@@ -1,5 +1,7 @@
 # Crawler and Scraper of Facebook Marketplace Post's
 
+![](assets/media/diagram.png)
+
 ## Backend
 
 A FastAPI consist of accessing posts published in Facebook marketplace and return the data to the frontend FastAPI

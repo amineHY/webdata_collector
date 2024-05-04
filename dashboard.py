@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from rich import print
 
-from config import cities
+from tools.config import cities
 import logging
 
 # Setup logging
