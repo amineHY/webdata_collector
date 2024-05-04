@@ -26,4 +26,4 @@ Launch the API server
 
     streamlit run dashboard.py
 
-![](./assets/media/README/image_2024-05-02-23-16-10_.png)
+![](./assets/media/README/image_2024-05-03-10-31-03_.png)
