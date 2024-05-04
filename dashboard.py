@@ -6,6 +6,12 @@ import streamlit as st
 from rich import print
 
 from config import cities
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # Create a title for the web app.
 st.title("Web Crawler & Scraper")
@@ -24,10 +30,15 @@ submit = st.button("Submit")
 
 # If the button is clicked.
 if submit:
+    logger.info("Submitted!")
 
     # Create the request url.
     URL = f"http://127.0.0.1:8000/crawler?city={city}&query={query}&max_price={max_price}"
+
+    logger.info("Request URL: {}".format(URL))
     response = requests.get(URL)
+
+    logger.info("Response Code: {}".format(response.status_code))
     response_json = response.json()
 
     # Check the status code of the request.
@@ -41,4 +52,6 @@ if submit:
             df = pd.read_json(data_io)
             st.write(df)
     else:
-        print(f"Request failed with status code: {response.status_code}")
+        logger.error(
+            f"Request failed with status code: {response.status_code}"
+        )
