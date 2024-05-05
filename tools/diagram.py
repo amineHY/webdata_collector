@@ -23,6 +23,9 @@ with Diagram(
     # Define the Streamlit dashboard as a user interface
     user = User("User")
 
+    # Define the connections
+    edge = Edge(color="black", style="bold")
+
     with Cluster("Flows"):
         with Cluster("Webapp"):
             # Define
@@ -42,11 +45,9 @@ with Diagram(
             # Define the CSV file storage
             csv_storage = Storage("Data Storage")
 
-    # Define the connections
-
-    client >> Edge(color="black", style="bold") << fast_api
-    (fast_api >> Edge(color="black", style="bold") << facebook_crawler)
-    user >> Edge(color="black", style="bold") >> client
+    client >> edge << fast_api
+    (fast_api >> edge << facebook_crawler)
+    user >> edge >> client
     data_processing - csv_storage
-    # (csv_storage >> Edge(color="black", style="bold") >> client)
-    fast_api >> Edge(color="black", style="bold") >> data_processing
+    # (csv_storage >> edge >> client)
+    fast_api >> edge >> data_processing
