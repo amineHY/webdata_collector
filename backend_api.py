@@ -90,14 +90,6 @@ async def crawler(
             logger.info("Crawler returned data")
             if print_data:
                 logger.info("Printing dataframe")
-                # print(df_crawler)
-            if save_data:
-                logger.info("Saving dataframe to CSV")
-
-                filepath = f"data/results_{city}_{query}_{max_price}.csv"
-                df_crawler.to_csv(filepath, index=False)
-                df_crawler = features_engineering(filepath)
-                df_crawler.to_csv(filepath[:-4] + "_cleaned.csv", index=False)
 
             elapsed_time = round(time.time() - start_time, 2)
             logger.info(f"Elapsed time: {elapsed_time} seconds")
@@ -342,43 +334,6 @@ def parse_facebook_marketplace_listings(html):
         return pd.DataFrame()
 
 
-def extract_data(html_content):
-    soup = BeautifulSoup(html_content, "html.parser")
-    item = {}
-
-    # Extract title
-    title_element = soup.find(
-        "span", class_="x1lliihq x6ikm8r x10wlt62 x1n2onr6"
-    )
-    if title_element:
-        item["title"] = title_element.text.strip()
-
-    # Extract price
-    price_element = soup.find(
-        "span",
-        class_="x193iq5w xeuugli x13faqbe x1vvkbs xlh3980 xvmahel x1n0sxbx x1lliihq x1s928wv xhkezso x1gmr53x x1cpjm7i x1fgarty x1943h6x x4zkp8e x3x7a5m x1lkfr7t x1lbecb7 x1s688f xzsf02u",
-    )
-    if price_element:
-        item["price"] = price_element.text.strip()
-
-    # Extract location
-    location_element = soup.find(
-        "span", class_="x1lliihq x6ikm8r x10wlt62 x1n2onr6 xlyipyv xuxw1ft"
-    )
-    if location_element:
-        item["location"] = location_element.text.strip()
-
-    # Extract item number from href attribute
-    href_element = soup.find(
-        "a",
-        class_="x1i10hfl xjbqb8w x1ejq31n xd10rxx x1sy0etr x17r0tee x972fbf xcfux6l x1qhh985 xm0m39n x9f619 x1ypdohk xt0psk2 xe8uvvx xdj266r x11i5rnm xat24cr x1mh8g0r xexx8yu x4uap5 x18d9i69 xkhd6sd x16tdsg8 x1hl2dhg xggy1nq x1a2a7pz x1heor9g x1sur9pj xkrqix3 x1lku1pv",
-    )
-    if href_element:
-        item["item_number"] = href_element["href"].split("/")[-2]
-
-    return item
-
-
 def get_single_post_data_using_css(html):
 
     try:
@@ -464,58 +419,6 @@ def get_post_info_from_html_css(soup):
         condition_element,
         publication_time,
     )
-
-
-def parse_facebook_marketplace_post_metadata(page, df):
-    """
-    Parameters
-    ----------
-    page : Playwright Page object
-        The page object representing the current webpage.
-    df : pandas.DataFrame
-        The DataFrame containing the URLs of the Facebook Marketplace posts.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The updated DataFrame with the parsed metadata for each listing.
-    """
-    if df.shape[0] > 0:
-        for index, row in df.iterrows():
-            try:
-                logger.info(
-                    f"Navigate to item {index} page's URL : {row['url']}"
-                )
-                page.goto(row["url"])
-                page.wait_for_load_state("networkidle")
-                logger.info(f"Getting {index}-th post content")
-                html = page.content()
-                soup = BeautifulSoup(html, "html.parser")
-                parent_div = soup.find(
-                    "div", class_="xyamay9 x1pi30zi x18d9i69 x1swvt13"
-                )
-
-                if parent_div:
-                    result = get_post_info_from_html_css(parent_div)
-
-                    df.loc[index, "title"] = result["title"]
-                    df.loc[index, "price"] = result["price"]
-                    df.loc[index, "location"] = result["location"]
-
-                    # df.loc[index, "condition"] = condition_element
-                    # df.loc[index, "publication_time"] = publication_time
-                    df.loc[index, "url"] = row["url"]
-                else:
-                    logger.warning(f"Parent div not found for item {index}")
-            except Exception as e:
-                logger.error(
-                    f"An error occurred while parsing item {index}: {e}"
-                )
-
-        return df
-    else:
-        logger.info("No listing found")
-        return None
 
 
 def features_engineering(filepath):
@@ -629,26 +532,26 @@ def count_lines_in_html_file(file_path):
         print(f"An error occurred: {e}")
 
 
-async def human_like_interactions(page):
-    """Perform human-like interactions on the page."""
-    logger.info("Mimic reading by scrolling and pausing")
-    total_scroll = 0
-    while total_scroll < 1000:
-        scroll_length = random.randint(100, 500)
-        await page.mouse.wheel(0, scroll_length)
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-        total_scroll += scroll_length
+# async def human_like_interactions(page):
+#     """Perform human-like interactions on the page."""
+#     logger.info("Mimic reading by scrolling and pausing")
+#     total_scroll = 0
+#     while total_scroll < 1000:
+#         scroll_length = random.randint(100, 500)
+#         await page.mouse.wheel(0, scroll_length)
+#         await asyncio.sleep(random.uniform(0.5, 1.5))
+#         total_scroll += scroll_length
 
-    logger.info("Click on non-interactive parts of the page")
-    for _ in range(random.randint(2, 5)):  # Multiple random clicks
-        await page.click(
-            "body",
-            position={
-                "x": random.randint(100, 300),
-                "y": random.randint(200, 600),
-            },
-        )
-        await asyncio.sleep(random.uniform(0.5, 1.5))  # Pause between clicks
+#     logger.info("Click on non-interactive parts of the page")
+#     for _ in range(random.randint(2, 5)):  # Multiple random clicks
+#         await page.click(
+#             "body",
+#             position={
+#                 "x": random.randint(100, 300),
+#                 "y": random.randint(200, 600),
+#             },
+#         )
+#         await asyncio.sleep(random.uniform(0.5, 1.5))  # Pause between clicks
 
 
 async def handle_cookies_popup(page, button_txt):
