@@ -1,4 +1,5 @@
 # Import necessary libraries
+import asyncio
 import datetime
 import logging
 import os
@@ -7,20 +8,36 @@ import time
 import urllib
 import urllib.parse
 from urllib.parse import urlparse
-from playwright.sync_api import TimeoutError
+
 import pandas as pd
 import uvicorn
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from fake_useragent import UserAgent
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from playwright.sync_api import sync_playwright, Playwright
+from langchain_community.llms.ollama import Ollama
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import OpenAI
+from playwright.async_api import TimeoutError, async_playwright
+from pydantic import BaseModel, Field, ValidationError
 from rich import print
 
 from tools.config import cities
 
-# Create an instance of the FastAPI class.
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# ----------------------------------------------------------------------------
+# Define API endpoints
+# ----------------------------------------------------------------------------
+
+logger.info("Setup FastAPI")
+
+
 app = FastAPI()
 
 # Configure CORS
@@ -37,136 +54,416 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-logger.info("Load environment variables from .env file")
-load_dotenv()
-email = os.getenv("email")
-password = os.getenv("password")
+@app.get("/")
+def root():
+    return {"message": "Hello, World!"}
+
+
+@app.get("/crawler/")
+async def crawler(
+    city: str,
+    query: str,
+    max_price: int,
+    headless: bool = False,
+    item_condition: str = "used_like_new",
+):
+    logger.info("START")
+    start_time = time.time()
+    try:
+        logger.info("Running the crawler")
+        print_data = True
+        save_data = True
+
+        df_crawler = await run_facebook_marketplace_crawler_and_parser(
+            city_param=city,
+            query_param=query,
+            max_price_param=max_price,
+            item_condition_param=item_condition,
+            headless_param=headless,
+        )
+
+        logger.info("END")
+
+        # wrap up
+        if not df_crawler.empty:
+            logger.info("Crawler returned data")
+            if print_data:
+                logger.info("Printing dataframe")
+                # print(df_crawler)
+            if save_data:
+                logger.info("Saving dataframe to CSV")
+
+                filepath = f"data/results_{city}_{query}_{max_price}.csv"
+                df_crawler.to_csv(filepath, index=False)
+                df_crawler = features_engineering(filepath)
+                df_crawler.to_csv(filepath[:-4] + "_cleaned.csv", index=False)
+
+            elapsed_time = round(time.time() - start_time, 2)
+            logger.info(f"Elapsed time: {elapsed_time} seconds")
+            return {
+                "status": "ok",
+                "data": df_crawler.to_json(orient="records"),
+            }
+        else:
+            logger.info("No data found by the crawler")
+            return {"status": "pok", "data": None}
+
+    except Exception as e:
+        logger.error(f"Error occurred: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----------------------------------------------------------------------------
+# Setup LMM parameters
+# ----------------------------------------------------------------------------
+
+logger.info("Setup LLM")
+
+
+def get_prompt():
+    llm_prompt = PromptTemplate(
+        template="""
+        Find and extract text of title, location, price, and item_number from HTML code of a Facebook marketplace post.
+        Make sure to return the values in a string and arrange them in a JSON format, here are some examples :
+        {json_example1}
+        {json_example2}
+        {json_example3}
+        {json_example4} (default values)
+        DISCLAIMER: DO NOT RETURN CODE OR EXPLANATION, ONLY RETURN A JSON WITH TEXT YOU EXTRACTED FROM HTML, EXCLUDE ANY WORDS OTHER THAN THE JSON, DO NOT EXPLAIN OR SAY 'HERE IS THE ...',
+
+        Here is the HTML code:
+        {HTML}
+        """,
+        input_variables=[
+            "json_example1",
+            "json_example2",
+            "json_example3",
+            "HTML",
+        ],
+    )
+    return llm_prompt
+
+
+def get_parser():
+    class Post(BaseModel):
+        title: str = Field(description="Title")
+        location: str = Field(description="Location")
+        price: str = Field(description="Price")
+        item_number: str = Field(description="Number of the item")
+
+    llm_parser = JsonOutputParser(pydantic_object=Post)
+    return llm_parser
+
+
+def get_model(model_name):
+    if model_name == "ollama":
+        llm_model = Ollama(model="llama3")
+        return llm_model
+
+    elif model_name == "gpt":
+        load_dotenv()
+        llm_model = OpenAI(openai_api_key=os.getenv("OPENAI_API_KEY"))  # type: ignore
+        return llm_model
+
+    else:
+        raise ValueError(f"{model_name} is not a supported model name.")
+
+
+llm_prompt = get_prompt()
+llm_model = get_model(model_name="ollama")
+llm_parser = get_parser()
+chain = llm_prompt | llm_model | llm_parser
+
+json_example1 = {
+    "title": "MacBook Pro URGENT",
+    "location": "Paris, IDF",
+    "price": "€ 200",
+    "item_number": "1927362054385880",
+}
+
+json_example2 = {
+    "title": "Sony Camera",
+    "location": "New York, NY",
+    "price": "$ 300",
+    "item_number": "1234567890123456",
+}
+
+json_example3 = {
+    "title": "Furniture",
+    "location": "Berlin, DE",
+    "price": "€ 150",
+    "item_number": "9876543210987654",
+}
+
+json_example4 = {
+    "title": "",
+    "location": "",
+    "price": "",
+    "item_number": "",
+}
+
+
+def get_post_info_from_html_llm(html_content):
+    try:
+        result = chain.invoke(
+            {
+                "HTML": html_content,
+                "json_example1": json_example1,
+                "json_example2": json_example2,
+                "json_example3": json_example3,
+                "json_example4": json_example4,
+            }
+        )
+        logger.info("Answer from LLM chain: {}".format(result))
+        return result
+    except ValidationError as e:
+        logger.error("Validation error: {}".format(e))
+    except Exception as e:
+        logger.error("Error: {}".format(e))
+
+
+# ----------------------------------------------------------------------------
+# Define Python Functions
+# ----------------------------------------------------------------------------
+
+
+def find_empty_html_divs(soup):
+    """
+    This function checks if there are empty <div> elements in the given HTML.
+
+    Parameters:
+    html (str): A string containing the HTML code to be checked.
+
+    Returns:
+    list: A list of empty <div> elements found in the HTML.
+    """
+    div_tags = soup.find_all("div")  # Find all div elements
+    empty_divs = [
+        div for div in div_tags if not div.contents
+    ]  # Check if div has no contents
+
+    return empty_divs
 
 
 def parse_facebook_marketplace_listings(html):
-    """
-    Parses Facebook Marketplace listings from the provided BeautifulSoup soup object.
-
-    Parameters
-    ----------
-    soup : BeautifulSoup
-        The BeautifulSoup soup object containing the HTML content of the Marketplace page.
-
-    Returns
-    -------
-    DataFrame
-        DataFrame containing parsed listing data.
-    """
-    logger.info("Parsing html of all listings' page")
+    logger.info("Parsing HTML of all posts' page")
     soup = BeautifulSoup(html, "html.parser")
 
-    # Get all listings
-    html_listings = soup.find_all(
+    logger.info("Getting HTML of all posts")
+    soup_posts = soup.find_all(
         "div",
         class_="x9f619 x78zum5 x1r8uery xdt5ytf x1iyjqo2 xs83m0k x1e558r4 x150jy0e x1iorvi4 xjkvuk6 xnpuxes x291uyu x1uepa24",
     )
+
     # Create an empty list to store the parsed data
     result = []
-    # Iterate through all listings
-    for idx, listing in enumerate(html_listings):
-        logger.info("Scraping data from post {}".format(idx))
-        # print(listing)
-        try:
-            title = listing.find(
-                "span", class_="x1lliihq x6ikm8r x10wlt62 x1n2onr6"
-            ).text
-        except Exception as e:
-            title = None
+    posts_count = len(soup_posts)
 
-        try:
-            price = listing.find(
-                "span",
-                class_="x193iq5w xeuugli x13faqbe x1vvkbs xlh3980 xvmahel x1n0sxbx x1lliihq x1s928wv xhkezso x1gmr53x x1cpjm7i x1fgarty x1943h6x x4zkp8e x3x7a5m x1lkfr7t x1lbecb7 x1s688f xzsf02u",
-            ).text
-        except Exception as e:
-            price = None
-        try:
-            location = listing.find(
-                "span",
-                class_="x1lliihq x6ikm8r x10wlt62 x1n2onr6 xlyipyv xuxw1ft",
-            ).text
-        except Exception as e:
-            location = None
-        try:
-            url_post = "https://www.facebook.com" + listing.find("a").get(
-                "href"
+    if posts_count > 0:
+        logger.info("Iterating through {} posts".format(posts_count))
+        for idx, soup_single_post in enumerate(soup_posts):
+            print("# ----------------------------------------------------")
+
+            empty_divs = find_empty_html_divs(soup_single_post)
+            if empty_divs:
+                print("There are empty divs in the HTML.")
+                continue
+            else:
+                print("No empty divs found in the HTML.")
+
+            logger.info(
+                "Extracting metadata from a single HTML post %d", idx + 1
             )
-        except Exception as e:
-            url_post = None
-        print(title, price, location, url_post)
+            # print(soup_single_post.prettify())
 
-        # Create a dictionary with the listing data
-        dict_listing_data = {
-            "title": title,
-            "price": price,
-            "location": location,
-            "url": url_post,
-            "date": datetime.date.today(),
-        }
+            try:
+                url_post = "https://www.facebook.com" + soup_single_post.find(
+                    "a"
+                ).get("href")
+                print(url_post)
+            except:
+                print(soup_single_post)
+                url_post = ""
 
-        result.append(dict_listing_data)
+            # logger.info("Extracting post's data using LLM chain")
+            # try:
+            #     post_data = get_post_info_from_html_llm(soup_single_post)
+            #     title = post_data.get("title")
+            #     price = post_data.get("price")
+            #     location = post_data.get("location")
+            #     item_number = post_data.get("item_number")
+            # except:
+            #     title = "None"
+            #     price = "None"
+            #     location = "None"
+            #     item_number = "None"
 
-    # Convert list to DataFrame
-    df = pd.DataFrame(result)
-    df = df.dropna(subset=["url"])
-    logger.info(f"{df.shape[0]} listings found")
+            logger.info("Extracting post's data using CSS Extractor")
+            html_content = soup_single_post.prettify()
+            title, price, location, item_number = (
+                get_single_post_data_using_css(html_content)
+            )
 
-    return df.sort_values(by="price", ascending=True)
+            logger.info("Update dictionary with extracted listing data")
+            result.append(
+                {
+                    "title": title,
+                    "price": price,
+                    "location": location,
+                    "item_number": item_number,
+                    "url": url_post,
+                    "date": datetime.date.today(),
+                }
+            )
+
+        # Convert list to DataFrame
+        df = pd.DataFrame(result)
+
+        if not df.empty:
+            logger.info("Crawler returned data")
+
+            # df = df.dropna(subset=["url"])
+            # df = df[df["url"].astype(bool)]
+
+            filepath = f"data/results_bronze.csv"
+
+            logger.info("Saving dataframe to CSV: Bronze")
+            df.to_csv(filepath, index=False)
+
+            logger.info("Saving dataframe to CSV: Silver")
+            df = features_engineering(filepath)
+
+            filepath = f"data/results_silver.csv"
+            df.to_csv(filepath, index=False)
+        return df  # .sort_values(by="price", ascending=True)
+    else:
+        logger.warn("No listing found")
+        return pd.DataFrame()
 
 
-def human_like_interactions(page):
-    """Perform human-like interactions on the page."""
-    logger.info("Mimic reading by scrolling and pausing")
-    total_scroll = 0
-    while total_scroll < 2000:
-        scroll_length = random.randint(100, 500)
-        page.mouse.wheel(0, scroll_length)
-        time.sleep(random.uniform(0.5, 1.5))  # Short pause to mimic reading
-        total_scroll += scroll_length
+def extract_data(html_content):
+    soup = BeautifulSoup(html_content, "html.parser")
+    item = {}
 
-    logger.info("Click on non-interactive parts of the page")
-    for _ in range(random.randint(2, 5)):  # Multiple random clicks
-        page.click(
-            "body",
-            position={
-                "x": random.randint(100, 300),
-                "y": random.randint(200, 600),
-            },
-        )
-        time.sleep(random.uniform(0.5, 1.5))  # Pause between clicks
+    # Extract title
+    title_element = soup.find(
+        "span", class_="x1lliihq x6ikm8r x10wlt62 x1n2onr6"
+    )
+    if title_element:
+        item["title"] = title_element.text.strip()
 
-    # Wait for some time after handling cookies
-    page.wait_for_timeout(random.uniform(2000, 5000))
+    # Extract price
+    price_element = soup.find(
+        "span",
+        class_="x193iq5w xeuugli x13faqbe x1vvkbs xlh3980 xvmahel x1n0sxbx x1lliihq x1s928wv xhkezso x1gmr53x x1cpjm7i x1fgarty x1943h6x x4zkp8e x3x7a5m x1lkfr7t x1lbecb7 x1s688f xzsf02u",
+    )
+    if price_element:
+        item["price"] = price_element.text.strip()
+
+    # Extract location
+    location_element = soup.find(
+        "span", class_="x1lliihq x6ikm8r x10wlt62 x1n2onr6 xlyipyv xuxw1ft"
+    )
+    if location_element:
+        item["location"] = location_element.text.strip()
+
+    # Extract item number from href attribute
+    href_element = soup.find(
+        "a",
+        class_="x1i10hfl xjbqb8w x1ejq31n xd10rxx x1sy0etr x17r0tee x972fbf xcfux6l x1qhh985 xm0m39n x9f619 x1ypdohk xt0psk2 xe8uvvx xdj266r x11i5rnm xat24cr x1mh8g0r xexx8yu x4uap5 x18d9i69 xkhd6sd x16tdsg8 x1hl2dhg xggy1nq x1a2a7pz x1heor9g x1sur9pj xkrqix3 x1lku1pv",
+    )
+    if href_element:
+        item["item_number"] = href_element["href"].split("/")[-2]
+
+    return item
 
 
-def handle_cookies_popup(page, button_txt="Allow all cookies"):
-    """_summary_
+def get_single_post_data_using_css(html):
 
-    Parameters
-    ----------
-    page : _type_
-        _description_
-    """
     try:
-        # Use a more specific selector that targets the button based on its role and name
-        allow_all_cookies_button = page.locator(
-            f"role=button[name='{button_txt}']"
+        # Parse the HTML
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Find the relevant div containing the item details
+        item_div = soup.find("div", class_="x9f619")
+
+        # Extract title
+        title_element = item_div.find(
+            "span", class_="x1lliihq x6ikm8r x10wlt62 x1n2onr6"
         )
-        # Wait for the button to be visible and enabled
-        allow_all_cookies_button.wait_for(state="visible")
-        allow_all_cookies_button.click()
-        logger.info(f"Clicked on '{button_txt}' button")
+        title = (
+            title_element.text.replace("\n", " ").strip()
+            if title_element
+            else "None"
+        )
+
+        # Extract price
+        price_element = item_div.find("span", class_="x193iq5w")
+        price = price_element.text.strip() if price_element else "None"
+
+        # Extract location
+        location_element = item_div.find("span", class_="x1nxh6w3")
+        location = (
+            location_element.text.strip() if location_element else "None"
+        )
+
+        # Extract item number from href attribute
+        item_number_element = item_div.find("a")
+        item_number = (
+            item_number_element["href"].split("/")[-2]
+            if item_number_element
+            else "None"
+        )
+
+        return title, price, location, item_number
     except Exception as e:
-        logger.info(f"An error occurred while handling cookies popup: {e}")
+        print("An error occurred:", e)
+
+
+def get_post_info_from_html_css(soup):
+
+    parent_div = soup.find("div", class_="xyamay9 x1pi30zi x18d9i69 x1swvt13")
+    title_elements = parent_div.select("h1")
+    if title_elements:
+        title_element = title_elements[0].text.strip()
+    else:
+        title_element = ""
+
+    price_elements = parent_div.select("div div div div span")
+    if len(price_elements) > 1:
+        price_element = price_elements[1].text.strip()
+    else:
+        price_element = ""
+
+    publication_time_element = parent_div.find("span", class_="html-span")
+    if publication_time_element:
+        publication_time = publication_time_element.get_text(strip=True)
+    else:
+        publication_time = ""
+
+    location_elements = parent_div.select("div div div div span a")
+    if location_elements:
+        location_element = location_elements[0].text.strip()
+    else:
+        location_element = ""
+
+    condition_div = soup.find("span", class_="x1e558r4 xp4054r x3hqpx7")
+    if condition_div:
+        condition_spans = condition_div.select("span")
+        if len(condition_spans) > 1:
+            condition_element = condition_spans[1].text.strip()
+        else:
+            condition_element = ""
+    else:
+        condition_element = ""
+    return (
+        title_element,
+        price_element,
+        location_element,
+        condition_element,
+        publication_time,
+    )
 
 
 def parse_facebook_marketplace_post_metadata(page, df):
@@ -176,7 +473,7 @@ def parse_facebook_marketplace_post_metadata(page, df):
     page : Playwright Page object
         The page object representing the current webpage.
     df : pandas.DataFrame
-        The DataFrame containing the URLs of the Facebook Marketplace listings.
+        The DataFrame containing the URLs of the Facebook Marketplace posts.
 
     Returns
     -------
@@ -199,53 +496,14 @@ def parse_facebook_marketplace_post_metadata(page, df):
                 )
 
                 if parent_div:
-                    title_elements = parent_div.select("h1")
-                    if title_elements:
-                        title_element = title_elements[0].text.strip()
-                    else:
-                        title_element = ""
+                    result = get_post_info_from_html_css(parent_div)
 
-                    price_elements = parent_div.select("div div div div span")
-                    if len(price_elements) > 1:
-                        price_element = price_elements[1].text.strip()
-                    else:
-                        price_element = ""
+                    df.loc[index, "title"] = result["title"]
+                    df.loc[index, "price"] = result["price"]
+                    df.loc[index, "location"] = result["location"]
 
-                    publication_time_element = parent_div.find(
-                        "span", class_="html-span"
-                    )
-                    if publication_time_element:
-                        publication_time = publication_time_element.get_text(
-                            strip=True
-                        )
-                    else:
-                        publication_time = ""
-
-                    location_elements = parent_div.select(
-                        "div div div div span a"
-                    )
-                    if location_elements:
-                        location_element = location_elements[0].text.strip()
-                    else:
-                        location_element = ""
-
-                    condition_div = soup.find(
-                        "span", class_="x1e558r4 xp4054r x3hqpx7"
-                    )
-                    if condition_div:
-                        condition_spans = condition_div.select("span")
-                        if len(condition_spans) > 1:
-                            condition_element = condition_spans[1].text.strip()
-                        else:
-                            condition_element = ""
-                    else:
-                        condition_element = ""
-
-                    df.loc[index, "title"] = title_element
-                    df.loc[index, "price"] = price_element
-                    df.loc[index, "condition"] = condition_element
-                    df.loc[index, "publication_time"] = publication_time
-                    df.loc[index, "location"] = location_element
+                    # df.loc[index, "condition"] = condition_element
+                    # df.loc[index, "publication_time"] = publication_time
                     df.loc[index, "url"] = row["url"]
                 else:
                     logger.warning(f"Parent div not found for item {index}")
@@ -260,115 +518,36 @@ def parse_facebook_marketplace_post_metadata(page, df):
         return None
 
 
-def crawle_facebook_marketplace(headless_param, url_login, url_marketplace, p):
-    """
-    Parameters
-    ----------
-    headless_param : bool
-        Determines whether the browser should be launched in headless mode or not.
-    url_login : str
-        The URL of the Facebook login page.
-    url_marketplace : str
-        The URL of the Facebook Marketplace.
-    p : Playwright object
-        The Playwright instance.
-
-    Returns
-    -------
-    browser : Playwright.Browser
-        The browser instance.
-    page : Playwright.Page
-        The page instance.
-    html : str
-        The HTML content of the marketplace page.
-    """
-    logger.info("Launching browser")
-    browser = p.webkit.launch(headless=headless_param)
-
-    # Set the viewport size to a random width and height between 800x600 and 1600x1200
-    viewport_width = random.randint(800, 1600)
-    viewport_height = random.randint(600, 1200)
-
-    # Set a fake user agent to avoid being blocked
-    ua = UserAgent()
-    user_agent = ua.random
-
-    # Define a browser context with the specified viewport size and user agent
-    context = browser.new_context(
-        user_agent=user_agent,
-        # locale='fr-FR',
-        # timezone_id='Europe/Paris',
-        locale="en-US",  # Set language
-        timezone_id="Europe/Paris",  # Emulate timezone
-        viewport={"width": viewport_width, "height": viewport_height},
-    )
-    page = context.new_page()
-    page.route("**/*.{png,jpg,jpeg}", lambda route: route.abort())
-
-    logger.info(f"Navigating to login page: {url_login}")
-    try:
-        page.goto(
-            url_login, timeout=60000
-        )  # Increase the timeout to 60 seconds (60000 ms)
-    except TimeoutError:
-        logger.error("Timeout occurred while navigating to the login page.")
-        context.close()
-        browser.close()
-        return None, None, None
-
-    page.wait_for_load_state("networkidle")
-    logger.info(f"Checking login page loaded : {page.title()}")
-    assert "Facebook" in page.title()
-
-    # Check if the cookie popup is visible and click the accept button
-    handle_cookies_popup(page, button_txt="Allow all cookies")
-    human_like_interactions(page)
-
-    logger.info("Filling login form")
-    page.wait_for_selector('input[name="email"]').fill(email)
-    page.wait_for_selector('input[name="pass"]').fill(password)
-
-    logger.info("Clicking login button")
-    page.wait_for_selector('button[name="login"]').click()
-    page.wait_for_load_state("networkidle")
-
-    logger.info(f"Navigating to marketplace : {url_marketplace}")
-    page.goto(url_marketplace)
-    page.wait_for_load_state("networkidle")
-
-    logger.info(f"Checking marketplace page loaded : {page.title()}")
-    page.wait_for_load_state("networkidle")
-    # assert "Marketplace" in page.title()
-
-    logger.info("Mimic reading by scrolling and pausing")
-    total_scroll = 0
-    while total_scroll < 8000:
-        scroll_length = random.randint(100, 500)
-        page.mouse.wheel(0, scroll_length)
-        time.sleep(random.uniform(0.5, 1.5))  # Short pause to mimic reading
-        total_scroll += scroll_length
-
-    logger.info("Getting page content")
-    html = page.content()
-
-    return browser, page, html
-
-
 def features_engineering(filepath):
-    """_summary_
 
-    Parameters
-    ----------
-    df : _type_
-        _description_
-    """
-    # Read the csv file
     df = pd.read_csv(filepath)
 
-    # Clean price column and convert to numeric
-    prices = df["price"].str.extract(r"(?:€\s*(\d+))?(?:€\s*(\d+))?")
-    df["price_before"] = prices[1]
-    df["price_after"] = prices[0]
+    def clean_price(price):
+        if "Gratuit" in price:
+            return 0  # Convert "Gratuit" to 0 or any other value you prefer
+        # Remove currency symbols and spaces, then convert to numeric
+        clean_price = (
+            price.replace("€", "")
+            .replace("$", "")
+            .replace(" ", "")
+            .replace(",", "")
+        )
+        return pd.to_numeric(clean_price, errors="coerce")
+
+    # Apply the function to the price column
+    df["cleaned_price"] = df["price"].apply(clean_price)
+
+    # Regular expression to capture prices with optional comma separators
+    prices = df["price"].str.extract(r"[$€]\s*([\d,]+)\s*[$€]?\s*([\d,]*)")
+
+    # Remove commas and convert to numeric, coercing errors to NaN
+    df["price_before"] = pd.to_numeric(
+        prices[1].str.replace(",", ""), errors="coerce"
+    )
+    df["price_after"] = pd.to_numeric(
+        prices[0].str.replace(",", ""), errors="coerce"
+    )
+
     df["price_difference"] = df["price_after"]
     df["price_difference"] = df["price_before"].astype(float) - df[
         "price_after"
@@ -400,8 +579,26 @@ def features_engineering(filepath):
 def setup_urls_facebook_marketplace(
     query_param, max_price_param, item_condition_param, city
 ):
+    """_summary_
+
+    Parameters
+    ----------
+    query_param : _type_
+        _description_
+    max_price_param : _type_
+        _description_
+    item_condition_param : _type_
+        _description_
+    city : _type_
+        _description_
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
     url_facebook = "https://www.facebook.com"
-    url_login = url_facebook + "/login/device-based/regular/login/"
+    url_login = url_facebook + "/login/"
 
     base_url_marketplace = f"{url_facebook}/marketplace/{city}/search/"
     query_params = {
@@ -415,133 +612,181 @@ def setup_urls_facebook_marketplace(
     return url_login, url_marketplace
 
 
-def run_facebook_marketplace_crawler_and_parser(
+def count_lines_in_html_file(file_path):
+    try:
+        # Open the HTML file in read mode
+        with open(file_path, "r", encoding="utf-8") as file:
+            # Initialize a counter for the number of lines
+            line_count = 0
+            # Iterate through each line in the file
+            for _ in file:
+                # Increment the line count for each line
+                line_count += 1
+        return line_count
+    except FileNotFoundError:
+        print(f"File '{file_path}' not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+async def human_like_interactions(page):
+    """Perform human-like interactions on the page."""
+    logger.info("Mimic reading by scrolling and pausing")
+    total_scroll = 0
+    while total_scroll < 1000:
+        scroll_length = random.randint(100, 500)
+        await page.mouse.wheel(0, scroll_length)
+        await asyncio.sleep(random.uniform(0.5, 1.5))
+        total_scroll += scroll_length
+
+    logger.info("Click on non-interactive parts of the page")
+    for _ in range(random.randint(2, 5)):  # Multiple random clicks
+        await page.click(
+            "body",
+            position={
+                "x": random.randint(100, 300),
+                "y": random.randint(200, 600),
+            },
+        )
+        await asyncio.sleep(random.uniform(0.5, 1.5))  # Pause between clicks
+
+
+async def handle_cookies_popup(page, button_txt):
+    try:
+        # Utiliser un sélecteur plus spécifique basé sur le rôle et le nom du bouton
+        allow_all_cookies_button = page.locator(
+            f"role=button[name='{button_txt}']"
+        )
+        # Attendre que le bouton soit visible et activé
+        await allow_all_cookies_button.wait_for(state="visible")
+        await allow_all_cookies_button.click()
+        logger.info(f"Clicked on '{button_txt}' button")
+    except Exception as e:
+        logger.error(f"An error occurred while handling cookies popup: {e}")
+
+
+async def run_facebook_marketplace_crawler_and_parser(
     city_param,
     query_param,
     max_price_param,
     headless_param=True,
     item_condition_param="new",
 ):
-    """_summary_
+    async with async_playwright() as p:
+        if city_param in cities:
+            city = cities[city_param]
+        else:
+            raise ValueError(f"{city_param} is not supported.")
 
-    Parameters
-    ----------
-    city_param : _type_
-        _description_
-    query_param : _type_
-        _description_
-    max_price_param : _type_
-        _description_
-    headless_param : bool, optional
-        _description_, by default True
-
-    Returns
-    -------
-    _type_
-        _description_
-
-    Raises
-    ------
-    ValueError
-        _description_
-    """
-    if city_param in cities:
-        city = cities[city_param]
-    else:
-        raise ValueError(f"{city_param} is not supported.")
-
-    url_login, url_marketplace = setup_urls_facebook_marketplace(
-        query_param, max_price_param, item_condition_param, city
-    )
-
-    with sync_playwright() as p:
-
-        browser, page, html = crawle_facebook_marketplace(
-            headless_param, url_login, url_marketplace, p
+        url_login, url_marketplace = setup_urls_facebook_marketplace(
+            query_param, max_price_param, item_condition_param, city
         )
-        df = parse_facebook_marketplace_listings(html)
-        time.sleep(2)
-        df = parse_facebook_marketplace_post_metadata(page, df)
 
-        # Close the browser
-        browser.close()
+        logger.info("Launching browser")
+        browser = await p.webkit.launch(headless=headless_param)
+
+        # Set the viewport size to a random width and height between 800x600 and 1600x1200
+        viewport_width = random.randint(1600, 1800)
+        viewport_height = random.randint(1200, 1400)
+
+        # Set a fake user agent to avoid being blocked
+        ua = UserAgent()
+        user_agent = ua.random
+
+        # Define a browser context with the specified viewport size and user agent
+        context = await browser.new_context(
+            user_agent=user_agent,
+            locale="en-US",  # Set language
+            # timezone_id="Europe/Paris",  # Emulate timezone
+            viewport={"width": viewport_width, "height": viewport_height},
+        )
+        page = await context.new_page()
+        await page.route("**/*.{png,jpg,jpeg}", lambda route: route.abort())
+
+        logger.info(f"Navigating to login page: {url_login}")
+        try:
+            await page.goto(
+                url_login, timeout=60000
+            )  # Increase the timeout to 60 seconds (60000 ms)
+        except TimeoutError:
+            logger.error(
+                "Timeout occurred while navigating to the login page."
+            )
+            await context.close()
+            await browser.close()
+            return None
+        await asyncio.sleep(3)  # Wait a bit before continuing
+        await page.wait_for_load_state("networkidle")
+
+        logger.info(
+            "Check if the cookie popup is visible and click the accept button"
+        )
+        await handle_cookies_popup(page, "Allow all cookies")
+
+        # Set a delay to mimic human-like behavior
+        await asyncio.sleep(2)  # Pause between clicks
+        email = os.getenv("email")
+        password = os.getenv("password")
+
+        logger.info("Filling login form")
+        email_input = await page.wait_for_selector(
+            'input[name="email"]', timeout=60000
+        )
+        await email_input.fill(email)
+        password_input = await page.wait_for_selector(
+            'input[name="pass"]', timeout=60000
+        )
+        await password_input.fill(password)
+
+        await page.wait_for_load_state("networkidle")
+        await asyncio.sleep(3)
+
+        logger.info(f"Navigating to marketplace : {url_marketplace}")
+        await page.goto(url_marketplace)
+        await page.wait_for_load_state("networkidle")
+
+        logger.info("Checking marketplace page loaded")
+        await page.wait_for_load_state("networkidle")
+        logger.info(f"Navigating to marketplace: {url_marketplace}")
+        logger.info("Mimic reading by scrolling and pausing")
+        total_scroll = 0
+        while total_scroll < 8000:
+            scroll_length = random.randint(100, 500)
+            await page.mouse.wheel(0, scroll_length)
+            await asyncio.sleep(
+                random.uniform(0.5, 1.5)
+            )  # Short pause to mimic reading
+            total_scroll += scroll_length
+
+        logger.info("Getting HTML content from the page")
+        await asyncio.sleep(
+            random.uniform(0.5, 1.5)
+        )  # Short pause to mimic reading
+        html = await page.content()
+        logger.info("Saving the HTML code")
+        filepath = "data/posts_html.html"
+        print(filepath)
+        with open(filepath, "w", encoding="utf-8") as file:
+            file.write(str(BeautifulSoup(html, "html.parser").prettify()))
+        # Example usage:
+        num_lines = count_lines_in_html_file(filepath)
+        print(f"Number of lines in '{filepath}': {num_lines}")
+
+        df = parse_facebook_marketplace_listings(html)
+        await asyncio.sleep(random.uniform(0.5, 1.5))  # Pause between clicks
+
+        await browser.close()
 
         return df
 
 
-@app.get("/")
-def root():
-    return {"message": "Hello, World!"}
+# ----------------------------------------------------------------------------
+# # Run the server
+# ----------------------------------------------------------------------------
 
 
-@app.get("/crawler/")
-def main(
-    city, query, max_price, headless=True, item_condition="used_like_new"
-):
-    """_summary_
-
-    Parameters
-    ----------
-    city : _type_
-        _description_
-    query : _type_
-        _description_
-    max_price : _type_
-        _description_
-    headless : bool, optional
-        _description_, by default True
-    item_condition : str, optional
-        _description_, by default 'used_like_new'
-
-    Returns
-    -------
-    _type_
-        _description_
-
-    Raises
-    ------
-    ValueError
-        _description_
-    """
-    # TODO Add parameters validation
-    logger.info("START")
-    start_time = time.time()
-
-    print_data = True
-    save_data = True
-
-    logger.info("Crawl listings")
-    df_crawler = run_facebook_marketplace_crawler_and_parser(
-        city_param=city,
-        query_param=query,
-        max_price_param=max_price,
-        item_condition_param=item_condition,
-        headless_param=headless,
-    )
-    # wrap up
-    if df_crawler is not None:
-        if print_data:
-            logger.info("Print results")
-            print(df_crawler)
-        if save_data:
-            logger.info("Saving results to CSV")
-            if df_crawler.empty:
-                raise ValueError("No data found")
-            filepath = f"data/results_{city}_{query}_{max_price}.csv"
-            df_crawler.to_csv(filepath, index=False)
-            df_crawler = features_engineering(filepath)
-            df_crawler.to_csv(filepath[:-4] + "_cleaned.csv", index=False)
-
-        end_time = time.time()
-        logger.info(f"Elapsed time: {round(end_time - start_time, 2)} seconds")
-
-        return {"status": "ok", "data": df_crawler.to_json()}
-    else:
-        return {"status": "pok", "data": None}
-
-
-# Run the server
 if __name__ == "__main__":
+
     uvicorn.run(
         app,
         host="0.0.0.0",

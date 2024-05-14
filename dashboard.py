@@ -1,57 +1,123 @@
 from io import StringIO
-
 import pandas as pd
 import requests
 import streamlit as st
-from rich import print
-
 from tools.config import cities
 import logging
+import plotly.express as px
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# Create a title for the web app.
+# Streamlit app setup
 st.title("Web Crawler & Scraper")
 st.header("Facebook Marketplace")
 
-# Add a list of supported cities.
+# Get supported cities
 supported_cities = list(cities.keys())
 
-# Take user input for the city, query, and max price.
-city = st.selectbox("City", supported_cities, 0)
-query = st.text_input("Query", "Macbook Pro")
-max_price = st.text_input("Max Price", "1000")
+# Sidebar user inputs
+st.sidebar.title("Search Parameters")
+city = st.sidebar.selectbox("City", supported_cities, 0)
+query = st.sidebar.text_input("Query", "Macbook Pro")
+max_price = st.sidebar.text_input("Max Price", "1000")
 
-# Create a button to submit the form.
-submit = st.button("Submit")
+# Submit button in the sidebar
+submit = st.sidebar.button("Submit")
 
-# If the button is clicked.
-if submit:
-    logger.info("Submitted!")
 
-    # Create the request url.
-    URL = f"http://127.0.0.1:8000/crawler?city={city}&query={query}&max_price={max_price}"
+def fetch_data(city, query, max_price):
+    url = f"http://127.0.0.1:8000/crawler?city={city}&query={query}&max_price={max_price}"
+    logger.info(f"Request URL: {url}")
+    response = requests.get(url)
+    logger.info(f"Response Code: {response.status_code}")
 
-    logger.info("Request URL: {}".format(URL))
-    response = requests.get(URL)
-
-    logger.info("Response Code: {}".format(response.status_code))
-    response_json = response.json()
-
-    # Check the status code of the request.
     if response.status_code == 200:
-        if response_json["data"] is None:
-            st.write("No results found")
-            df = None
-        else:
-            # Use StringIO to create a file-like object from the JSON string
-            data_io = StringIO(response_json["data"])
-            df = pd.read_json(data_io)
-            st.write(df)
+        return response.json()
     else:
         logger.error(
             f"Request failed with status code: {response.status_code}"
         )
+        return None
+
+
+if submit:
+    logger.info("Form Submitted")
+    response_json = fetch_data(city, query, max_price)
+
+    if response_json:
+        data = response_json.get("data")
+        if data is None:
+            st.write("No results found")
+        else:
+            # Convert JSON string to DataFrame
+            try:
+                data_io = StringIO(data)
+                df = pd.read_json(data_io)
+                st.write(df)
+
+                # Plot: Group by Location and Count
+                location_counts = df["location"].value_counts().reset_index()
+                location_counts.columns = ["Location", "Count"]
+
+                fig1 = px.bar(
+                    location_counts,
+                    x="Location",
+                    y="Count",
+                    title="Number of Items Listed per Location",
+                )
+                st.plotly_chart(fig1)
+
+                # Plot: Price Distribution
+                fig2 = px.histogram(
+                    df,
+                    x="cleaned_price",
+                    nbins=10,
+                    title="Price Distribution of Listed Items",
+                )
+                st.plotly_chart(fig2)
+
+                # Plot: Average Price per Location
+                avg_price_per_location = (
+                    df.groupby("location")["cleaned_price"]
+                    .mean()
+                    .reset_index()
+                )
+                fig3 = px.bar(
+                    avg_price_per_location,
+                    x="location",
+                    y="cleaned_price",
+                    title="Average Price per Location",
+                )
+                st.plotly_chart(fig3)
+
+                # Additional plots suggestions
+                # 1. Distribution of items per price range
+                fig4 = px.histogram(
+                    df,
+                    x="cleaned_price",
+                    title="Distribution of Items per Price Range",
+                    labels={"cleaned_price": "Price (€)"},
+                )
+                st.plotly_chart(fig4)
+
+                # 2. Box plot to show the spread and outliers of prices per location
+                fig5 = px.box(
+                    df,
+                    x="location",
+                    y="cleaned_price",
+                    title="Price Spread per Location",
+                    labels={
+                        "cleaned_price": "Price (€)",
+                        "location": "Location",
+                    },
+                )
+                st.plotly_chart(fig5)
+            except ValueError as e:
+                logger.error(f"Error reading JSON data: {e}")
+                st.error(
+                    "Error reading data. Please check the format of the returned data."
+                )
+    else:
+        st.write("Failed to retrieve data. Please try again.")
