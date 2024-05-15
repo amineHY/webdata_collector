@@ -1,10 +1,10 @@
-# Crawler and Scraper of Facebook Marketplace Post's : CSS or LLM
+# Crawler and Scraper of Marketplace Post's using CSS or LLM
 
 ![](assets/media/diagram.png)
 
 ## Backend
 
-A FastAPI consist of accessing posts published in Facebook marketplace and return the data to the frontend FastAPI
+A FastAPI consist of accessing posts published in marketplace and return the data to the frontend FastAPI
 
 ## Frontend
 
