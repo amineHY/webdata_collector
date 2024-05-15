@@ -55,11 +55,13 @@ app.add_middleware(
 )
 
 
+# Root endpoint
 @app.get("/")
 def root():
     return {"message": "Hello, World!"}
 
 
+# Crawler endpoint
 @app.get("/crawler/")
 async def crawler(
     city: str,
@@ -68,13 +70,34 @@ async def crawler(
     headless: bool = False,
     item_condition: str = "used_like_new",
 ):
+    return await handle_crawler_request(
+        city, query, max_price, headless, item_condition
+    )
+
+
+# Function to process crawler response
+def process_crawler_response(df_crawler, start_time):
+    if not df_crawler.empty:
+        logger.info("Crawler returned data")
+        elapsed_time = round(time.time() - start_time, 2)
+        logger.info(f"Elapsed time: {elapsed_time} seconds")
+        return {
+            "status": "ok",
+            "data": df_crawler.to_json(orient="records"),
+        }
+    else:
+        logger.info("No data found by the crawler")
+        return {"status": "pok", "data": None}
+
+
+async def handle_crawler_request(
+    city, query, max_price, headless, item_condition
+):
     logger.info("START")
     start_time = time.time()
+
     try:
         logger.info("Running the crawler")
-        print_data = True
-        save_data = True
-
         df_crawler = await run_facebook_marketplace_crawler_and_parser(
             city_param=city,
             query_param=query,
@@ -84,22 +107,7 @@ async def crawler(
         )
 
         logger.info("END")
-
-        # wrap up
-        if not df_crawler.empty:
-            logger.info("Crawler returned data")
-            if print_data:
-                logger.info("Printing dataframe")
-
-            elapsed_time = round(time.time() - start_time, 2)
-            logger.info(f"Elapsed time: {elapsed_time} seconds")
-            return {
-                "status": "ok",
-                "data": df_crawler.to_json(orient="records"),
-            }
-        else:
-            logger.info("No data found by the crawler")
-            return {"status": "pok", "data": None}
+        return process_crawler_response(df_crawler, start_time)
 
     except Exception as e:
         logger.error(f"Error occurred: {e}")
@@ -568,6 +576,62 @@ async def handle_cookies_popup(page, button_txt):
         logger.error(f"An error occurred while handling cookies popup: {e}")
 
 
+async def setup_browser_context(p, headless):
+    browser = await p.webkit.launch(headless=headless)
+    viewport_width = random.randint(1600, 1800)
+    viewport_height = random.randint(1200, 1400)
+    ua = UserAgent()
+    user_agent = ua.random
+    context = await browser.new_context(
+        user_agent=user_agent,
+        locale="en-US",
+        viewport={"width": viewport_width, "height": viewport_height},
+    )
+    return browser, context
+
+
+async def login_facebook(page, url_login):
+    await page.goto(url_login, timeout=60000)
+    await asyncio.sleep(3)
+    await page.wait_for_load_state("networkidle")
+    await handle_cookies_popup(page, "Allow all cookies")
+    await asyncio.sleep(2)
+
+    email = os.getenv("email")
+    password = os.getenv("password")
+    email_input = await page.wait_for_selector(
+        'input[name="email"]', timeout=60000
+    )
+    await email_input.fill(email)
+    password_input = await page.wait_for_selector(
+        'input[name="pass"]', timeout=60000
+    )
+    await password_input.fill(password)
+    await page.wait_for_load_state("networkidle")
+    await asyncio.sleep(3)
+
+
+async def save_html(html, filepath):
+    with open(filepath, "w", encoding="utf-8") as file:
+        file.write(str(BeautifulSoup(html, "html.parser").prettify()))
+    num_lines = count_lines_in_html_file(filepath)
+    logger.info(f"Number of lines in '{filepath}': {num_lines}")
+
+
+async def scrape_marketplace(page, url_marketplace):
+    await page.goto(url_marketplace)
+    await page.wait_for_load_state("networkidle")
+    total_scroll = 0
+    while total_scroll < 8000:
+        scroll_length = random.randint(100, 500)
+        await page.mouse.wheel(0, scroll_length)
+        await asyncio.sleep(random.uniform(0.5, 1.5))
+        total_scroll += scroll_length
+    await asyncio.sleep(random.uniform(0.5, 1.5))
+    html = await page.content()
+    return html
+
+
 async def run_facebook_marketplace_crawler_and_parser(
     city_param,
     query_param,
@@ -575,110 +639,42 @@ async def run_facebook_marketplace_crawler_and_parser(
     headless_param=True,
     item_condition_param="new",
 ):
+    if city_param in cities:
+        city = cities[city_param]
+    else:
+        raise ValueError(f"{city_param} is not supported.")
+
+    url_login, url_marketplace = setup_urls_facebook_marketplace(
+        query_param, max_price_param, item_condition_param, city
+    )
+    filepath = "data/posts_html.html"
+
     async with async_playwright() as p:
-        if city_param in cities:
-            city = cities[city_param]
-        else:
-            raise ValueError(f"{city_param} is not supported.")
-
-        url_login, url_marketplace = setup_urls_facebook_marketplace(
-            query_param, max_price_param, item_condition_param, city
-        )
-
-        logger.info("Launching browser")
-        browser = await p.webkit.launch(headless=headless_param)
-
-        # Set the viewport size to a random width and height between 800x600 and 1600x1200
-        viewport_width = random.randint(1600, 1800)
-        viewport_height = random.randint(1200, 1400)
-
-        # Set a fake user agent to avoid being blocked
-        ua = UserAgent()
-        user_agent = ua.random
-
-        # Define a browser context with the specified viewport size and user agent
-        context = await browser.new_context(
-            user_agent=user_agent,
-            locale="en-US",  # Set language
-            # timezone_id="Europe/Paris",  # Emulate timezone
-            viewport={"width": viewport_width, "height": viewport_height},
-        )
-        page = await context.new_page()
-        await page.route("**/*.{png,jpg,jpeg}", lambda route: route.abort())
-
-        logger.info(f"Navigating to login page: {url_login}")
         try:
-            await page.goto(
-                url_login, timeout=60000
-            )  # Increase the timeout to 60 seconds (60000 ms)
-        except TimeoutError:
-            logger.error(
-                "Timeout occurred while navigating to the login page."
+            logger.info("Setup browser and context (Playwright)")
+            browser, context = await setup_browser_context(p, headless_param)
+            page = await context.new_page()
+            await page.route(
+                "**/*.{png,jpg,jpeg}", lambda route: route.abort()
             )
+
+            logger.info(f"Navigating to login page: {url_login}")
+            await login_facebook(page, url_login)
+
+            logger.info(f"Navigating to marketplace: {url_marketplace}")
+            html = await scrape_marketplace(page, url_marketplace)
+
+            logger.info("Saving the HTML code")
+            await save_html(html, filepath)
+
+            df = parse_facebook_marketplace_listings(html)
+
+        except TimeoutError:
+            logger.error("Timeout occurred during the crawling process.")
+            df = None
+        finally:
             await context.close()
             await browser.close()
-            return None
-        await asyncio.sleep(3)  # Wait a bit before continuing
-        await page.wait_for_load_state("networkidle")
-
-        logger.info(
-            "Check if the cookie popup is visible and click the accept button"
-        )
-        await handle_cookies_popup(page, "Allow all cookies")
-
-        # Set a delay to mimic human-like behavior
-        await asyncio.sleep(2)  # Pause between clicks
-        email = os.getenv("email")
-        password = os.getenv("password")
-
-        logger.info("Filling login form")
-        email_input = await page.wait_for_selector(
-            'input[name="email"]', timeout=60000
-        )
-        await email_input.fill(email)
-        password_input = await page.wait_for_selector(
-            'input[name="pass"]', timeout=60000
-        )
-        await password_input.fill(password)
-
-        await page.wait_for_load_state("networkidle")
-        await asyncio.sleep(3)
-
-        logger.info(f"Navigating to marketplace : {url_marketplace}")
-        await page.goto(url_marketplace)
-        await page.wait_for_load_state("networkidle")
-
-        logger.info("Checking marketplace page loaded")
-        await page.wait_for_load_state("networkidle")
-        logger.info(f"Navigating to marketplace: {url_marketplace}")
-        logger.info("Mimic reading by scrolling and pausing")
-        total_scroll = 0
-        while total_scroll < 8000:
-            scroll_length = random.randint(100, 500)
-            await page.mouse.wheel(0, scroll_length)
-            await asyncio.sleep(
-                random.uniform(0.5, 1.5)
-            )  # Short pause to mimic reading
-            total_scroll += scroll_length
-
-        logger.info("Getting HTML content from the page")
-        await asyncio.sleep(
-            random.uniform(0.5, 1.5)
-        )  # Short pause to mimic reading
-        html = await page.content()
-        logger.info("Saving the HTML code")
-        filepath = "data/posts_html.html"
-        print(filepath)
-        with open(filepath, "w", encoding="utf-8") as file:
-            file.write(str(BeautifulSoup(html, "html.parser").prettify()))
-        # Example usage:
-        num_lines = count_lines_in_html_file(filepath)
-        print(f"Number of lines in '{filepath}': {num_lines}")
-
-        df = parse_facebook_marketplace_listings(html)
-        await asyncio.sleep(random.uniform(0.5, 1.5))  # Pause between clicks
-
-        await browser.close()
 
         return df
 
@@ -686,7 +682,6 @@ async def run_facebook_marketplace_crawler_and_parser(
 # ----------------------------------------------------------------------------
 # # Run the server
 # ----------------------------------------------------------------------------
-
 
 if __name__ == "__main__":
 
