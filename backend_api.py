@@ -284,7 +284,7 @@ def parse_facebook_marketplace_listings(html, parsing_method = 'css'):
             except:
                 print(soup_single_post)
                 url_post = ""
-            
+
             if parsing_method == 'llm':
                 logger.info("Extracting post's data using LLM chain")
                 try:
