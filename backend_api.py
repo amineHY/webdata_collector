@@ -204,7 +204,7 @@ json_example4 = {
 }
 
 
-def get_post_info_from_html_llm(html_content):
+def get_single_post_data_using_llm(html_content):
     try:
         result = chain.invoke(
             {
@@ -246,7 +246,7 @@ def find_empty_html_divs(soup):
     return empty_divs
 
 
-def parse_facebook_marketplace_listings(html):
+def parse_facebook_marketplace_listings(html, parsing_method = 'css'):
     logger.info("Parsing HTML of all posts' page")
     soup = BeautifulSoup(html, "html.parser")
 
@@ -275,7 +275,6 @@ def parse_facebook_marketplace_listings(html):
             logger.info(
                 "Extracting metadata from a single HTML post %d", idx + 1
             )
-            # print(soup_single_post.prettify())
 
             try:
                 url_post = "https://www.facebook.com" + soup_single_post.find(
@@ -285,25 +284,28 @@ def parse_facebook_marketplace_listings(html):
             except:
                 print(soup_single_post)
                 url_post = ""
+            
+            if parsing_method == 'llm':
+                logger.info("Extracting post's data using LLM chain")
+                try:
+                    post_data = get_single_post_data_using_llm(soup_single_post)
+                    title = post_data.get("title")
+                    price = post_data.get("price")
+                    location = post_data.get("location")
+                    item_number = post_data.get("item_number")
+                except:
+                    title = "None"
+                    price = "None"
+                    location = "None"
+                    item_number = "None"
 
-            logger.info("Extracting post's data using LLM chain")
-            try:
-                post_data = get_post_info_from_html_llm(soup_single_post)
-                title = post_data.get("title")
-                price = post_data.get("price")
-                location = post_data.get("location")
-                item_number = post_data.get("item_number")
-            except:
-                title = "None"
-                price = "None"
-                location = "None"
-                item_number = "None"
-
-            logger.info("Extracting post's data using CSS Extractor")
-            html_content = soup_single_post.prettify()
-            title, price, location, item_number = (
-                get_single_post_data_using_css(html_content)
-            )
+            elif parsing_method == "css":
+                logger.info("Extracting post's data using CSS Extractor")
+                html_content = soup_single_post.prettify()
+                title, price, location, item_number = (
+                    get_single_post_data_using_css(html_content)
+                )
+            else:
 
             logger.info("Update dictionary with extracted listing data")
             result.append(
@@ -490,24 +492,6 @@ def features_engineering(filepath):
 def setup_urls_facebook_marketplace(
     query_param, max_price_param, item_condition_param, city
 ):
-    """_summary_
-
-    Parameters
-    ----------
-    query_param : _type_
-        _description_
-    max_price_param : _type_
-        _description_
-    item_condition_param : _type_
-        _description_
-    city : _type_
-        _description_
-
-    Returns
-    -------
-    _type_
-        _description_
-    """
     url_facebook = "https://www.facebook.com"
     url_login = url_facebook + "/login/"
 
@@ -564,7 +548,6 @@ def count_lines_in_html_file(file_path):
 
 async def handle_cookies_popup(page, button_txt):
     try:
-        # Utiliser un sélecteur plus spécifique basé sur le rôle et le nom du bouton
         allow_all_cookies_button = page.locator(
             f"role=button[name='{button_txt}']"
         )
