@@ -12,12 +12,6 @@ A simple streamlit dashboard that allows the user to interact with the backend A
 
 A simple query is sent to the backend then, the data is collected by the backend api, crawler & scraper. The collected data is saved in a CSV file
 
-## Data processing pipeline
-
-This file consist of cleaning and augmenting the data of the CSV file.
-
-![](./assets/media/README/image_2024-05-02-23-23-46_.png)
-
 ## Run the project
 
 Launch the API server
@@ -28,4 +22,4 @@ Launch the API server
 
     streamlit run dashboard.py
 
-![](./assets/media/README/image_2024-05-03-10-31-03_.png)
+![](./assets/media/README/image_2024-05-15-12-14-15_.png)

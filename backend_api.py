@@ -278,18 +278,18 @@ def parse_facebook_marketplace_listings(html):
                 print(soup_single_post)
                 url_post = ""
 
-            # logger.info("Extracting post's data using LLM chain")
-            # try:
-            #     post_data = get_post_info_from_html_llm(soup_single_post)
-            #     title = post_data.get("title")
-            #     price = post_data.get("price")
-            #     location = post_data.get("location")
-            #     item_number = post_data.get("item_number")
-            # except:
-            #     title = "None"
-            #     price = "None"
-            #     location = "None"
-            #     item_number = "None"
+            logger.info("Extracting post's data using LLM chain")
+            try:
+                post_data = get_post_info_from_html_llm(soup_single_post)
+                title = post_data.get("title")
+                price = post_data.get("price")
+                location = post_data.get("location")
+                item_number = post_data.get("item_number")
+            except:
+                title = "None"
+                price = "None"
+                location = "None"
+                item_number = "None"
 
             logger.info("Extracting post's data using CSS Extractor")
             html_content = soup_single_post.prettify()
