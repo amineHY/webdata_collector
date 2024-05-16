@@ -1,46 +1,93 @@
-from langchain.chat_models import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
-
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_community.llms import Ollama
+from langchain_openai import ChatOpenAI
 from core.config import settings
+from pydantic import BaseModel, Field, ValidationError
+from typing import Optional
+from core.logging import logger
+
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 
-def setup_llm_chain():
-    response_schemas = [
-        ResponseSchema(name="title", description="Title of the listing"),
-        ResponseSchema(name="price", description="Price of the listing"),
-        ResponseSchema(name="location", description="Location of the listing"),
-        ResponseSchema(
-            name="item_number", description="Item number of the listing"
-        ),
-    ]
+def get_model(llm_choice_param, model_name_param):
 
-    output_parser = StructuredOutputParser.from_response_schemas(
-        response_schemas
+    if llm_choice_param.lower() == "ollama":
+        print("Using OpenAI")
+
+        llm_model = Ollama(model=model_name_param)
+        return llm_model
+
+    elif llm_choice_param.lower() == "openai":
+        llm_model = ChatOpenAI(
+            api_key=settings.OPENAI_API_KEY, model=model_name_param
+        )
+        return llm_model
+
+    else:
+        raise ValueError(
+            f"{model_name_param} is not a supported model name in {llm_choice_param}."
+        )
+
+
+def setup_llm_chain(llm_choice_param="OpenAI", model_name_param="gpt-4"):
+    class Post(BaseModel):
+        """https://python.langchain.com/v0.1/docs/use_cases/extraction/quickstart/"""
+
+        title: Optional[str] = Field(
+            description="Title of the post",
+            default="None",
+        )
+        location: Optional[str] = Field(
+            description="Location of the product",
+            default="None",
+        )
+        price: Optional[str] = Field(
+            description="Price of the product",
+            default="None",
+        )
+        item_number: Optional[str] = Field(
+            description="Marketplace item number",
+            default="None",
+        )
+
+    logger.info(f"Loading LLM prompt")
+    llm_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are an expert extraction algorithm. "
+                "Only extract relevant information from the text. "
+                "If you do not know the value of an attribute asked to extract, "
+                "return null for the attribute's value."
+                "Find and extract text of title, location, price, and item_number from HTML code of a Facebook marketplace post.",
+            ),
+            # # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            # MessagesPlaceholder("examples"),  # <-- EXAMPLES!
+            # # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+            ("human", "{HTML}"),
+        ]
     )
-    format_instructions = output_parser.get_format_instructions()
 
-    prompt = ChatPromptTemplate.from_template(
-        "Extract listing data from HTML:\n\n{html}\n\n{format_instructions}"
-    )
+    logger.info(f"Loading LLM Model : {llm_choice_param}, {model_name_param}")
+    llm_model = get_model(llm_choice_param, model_name_param)
+    chain = llm_prompt | llm_model.with_structured_output(schema=Post)
 
-    llm = ChatOpenAI(
-        model="gpt-4",
-        openai_api_key=settings.OPENAI_API_KEY,
-        temperature=0,
-    )
-
-    chain = LLMChain(llm=llm, prompt=prompt, output_parser=output_parser)
     return chain
 
 
-def get_single_post_data_using_llm(soup_single_post):
-    chain = setup_llm_chain()
-    html = soup_single_post.prettify()
-    format_instructions = chain.prompt.output_parser.get_format_instructions()
+def get_single_post_data_using_llm(html, llm_choice_param, model_name_param):
+    logger.info("Setup LLM")
+    chain = setup_llm_chain(llm_choice_param, model_name_param)
 
-    response = chain.run(
-        {"html": html, "format_instructions": format_instructions}
-    )
+    logger.info("Invoke LLM")
+    response = chain.invoke({"HTML": html})
     return response
