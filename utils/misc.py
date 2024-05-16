@@ -1,3 +1,5 @@
+import urllib.parse
+
 cities = {
     "Paris": "paris",
     "New York": "nyc",
@@ -45,3 +47,21 @@ cities = {
     "San Francisco": "sanfrancisco",
     "Tampa": "tampa",
 }
+
+
+def setup_urls_facebook_marketplace(query, max_price, city, item_condition):
+    url_login = "https://www.facebook.com/login"
+    base_url_marketplace = (
+        f"https://www.facebook.com/marketplace/{city}/search/"
+    )
+
+    query_params = {
+        "query": query,
+        "maxPrice": max_price,
+        "itemCondition": item_condition,
+        "exact": "true",
+    }
+    encoded_query_params = urllib.parse.urlencode(query_params)
+    url_marketplace = f"{base_url_marketplace}?{encoded_query_params}"
+
+    return url_login, url_marketplace

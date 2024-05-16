@@ -5,6 +5,7 @@ import streamlit as st
 from tools.config import cities
 import logging
 import plotly.express as px
+import json
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -22,15 +23,23 @@ st.sidebar.title("Search Parameters")
 city = st.sidebar.selectbox("City", supported_cities, 0)
 query = st.sidebar.text_input("Query", "Macbook Pro")
 max_price = st.sidebar.text_input("Max Price", "1000")
+selected_condition = st.sidebar.selectbox(
+    "Condition", ["new", "used_like_new", "used_good", "used_fair"], index=1
+)
+headless = st.sidebar.selectbox("Headless", [True, False], index=1)
 
 # Submit button in the sidebar
 submit = st.sidebar.button("Submit")
 
 
-def fetch_data(city, query, max_price):
-    url = f"http://127.0.0.1:8000/crawler?city={city}&query={query}&max_price={max_price}"
+def fetch_data(city, query, max_price, item_condition, headless):
+    url = (
+        f"http://127.0.0.1:8000/crawler/?"
+        f"city={city}&query={query}&max_price={max_price}&itemCondition={item_condition}&headless={headless}"
+    )
     logger.info(f"Request URL: {url}")
     response = requests.get(url)
+
     logger.info(f"Response Code: {response.status_code}")
 
     if response.status_code == 200:
@@ -44,14 +53,16 @@ def fetch_data(city, query, max_price):
 
 if submit:
     logger.info("Form Submitted")
-    response_json = fetch_data(city, query, max_price)
+    response_json = fetch_data(
+        city, query, max_price, selected_condition, headless
+    )
 
     if response_json:
         data = response_json.get("data")
         if data is None:
             st.write("No results found")
         else:
-            # Convert JSON string to DataFrame
+            # Convert JSON response to DataFrame
             try:
                 data_io = StringIO(data)
                 df = pd.read_json(data_io)
