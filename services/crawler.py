@@ -1,18 +1,13 @@
 import time
 
 from fastapi import HTTPException
-from playwright.async_api import async_playwright, TimeoutError
+from playwright.async_api import TimeoutError, async_playwright
 
-from core.logging import logger
+from core.logging import logger, setup_logging
 from services.parser import parse_facebook_marketplace_listings
-from utils.browser import (
-    setup_browser_context,
-    login_facebook,
-    scrape_marketplace,
-    save_html,
-)
+from utils.browser import (login_facebook, save_html, scrape_marketplace,
+                           setup_browser_context)
 from utils.misc import cities, setup_urls_facebook_marketplace
-from core.logging import setup_logging
 
 logger = setup_logging()
 
