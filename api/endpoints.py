@@ -23,6 +23,9 @@ class QueryParams(BaseModel):
     max_price: float
     itemCondition: str
     headless: bool = True
+    strategy: str  # Add the strategy parameter
+    llm_choice: str  # Add the llm_choice parameter
+    model_name: str  # Add the model_name parameter
 
 
 # Define the endpoint for the crawler
@@ -36,6 +39,9 @@ async def crawler(params: QueryParams = Depends()):
             params.max_price,
             params.itemCondition,
             params.headless,
+            params.strategy,  # Pass the strategy parameter
+            params.llm_choice,  # Pass the llm_choice parameter
+            params.model_name,  # Pass the model_name parameter
         )
     except Exception as e:
         logger.error("Error handling crawler request: %s", str(e))

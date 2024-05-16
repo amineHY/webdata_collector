@@ -1,41 +1,31 @@
+import logging
 from io import StringIO
+
 import pandas as pd
+import plotly.express as px
 import requests
 import streamlit as st
+
 from utils.misc import cities
-import logging
-import plotly.express as px
-import json
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Streamlit app setup
-st.title("Web Crawler & Scraper")
-st.header("Facebook Marketplace")
 
-# Get supported cities
-supported_cities = list(cities.keys())
-
-# Sidebar user inputs
-st.sidebar.title("Search Parameters")
-city = st.sidebar.selectbox("City", supported_cities, 0)
-query = st.sidebar.text_input("Query", "Macbook Pro")
-max_price = st.sidebar.text_input("Max Price", "1000")
-selected_condition = st.sidebar.selectbox(
-    "Condition", ["new", "used_like_new", "used_good", "used_fair"], index=1
-)
-headless = st.sidebar.selectbox("Headless", [True, False], index=1)
-
-# Submit button in the sidebar
-submit = st.sidebar.button("Submit")
-
-
-def fetch_data(city, query, max_price, item_condition, headless):
+def fetch_data(
+    city,
+    query,
+    max_price,
+    item_condition,
+    headless,
+    strategy,
+    llm_choice,
+    model_name,
+):
     url = (
         f"http://127.0.0.1:8000/crawler/?"
-        f"city={city}&query={query}&max_price={max_price}&itemCondition={item_condition}&headless={headless}"
+        f"city={city}&query={query}&max_price={max_price}&itemCondition={item_condition}&headless={headless}&strategy={strategy}&llm_choice={llm_choice}&model_name={model_name}"
     )
     logger.info(f"Request URL: {url}")
     response = requests.get(url)
@@ -51,10 +41,64 @@ def fetch_data(city, query, max_price, item_condition, headless):
         return None
 
 
+def choose_strategy(strategy):
+    if strategy == "LLM":
+        llm_choice = st.sidebar.selectbox(
+            "Choose between OpenAI or Ollama", ["OpenAI", "Ollama"]
+        )
+        model_name = st.sidebar.selectbox(
+            (
+                "Choose OpenAI model name"
+                if llm_choice == "OpenAI"
+                else "Choose Ollama model"
+            ),
+            (
+                ["gpt-4", "gpt-3.5-turbo"]
+                if llm_choice == "OpenAI"
+                else ["llama2", "llama3"]
+            ),
+        )
+    elif strategy == "CSS":
+        llm_choice, model_name = None, None
+    return strategy, llm_choice, model_name
+
+
+# Streamlit app setup
+st.title("Web Crawler & Scraper")
+st.header("Facebook Marketplace")
+
+# Get supported cities
+supported_cities = list(cities.keys())
+
+# Sidebar user inputs
+st.sidebar.title("Search Parameters")
+city = st.sidebar.selectbox("City", supported_cities, 0)
+query = st.sidebar.text_input("Product Name", "Macbook Pro")
+max_price = st.sidebar.text_input("Max Price", "1000")
+selected_condition = st.sidebar.selectbox(
+    "Condition", ["new", "used_like_new", "used_good", "used_fair"], index=1
+)
+st.sidebar.header("Scraping Parameters")
+
+headless = st.sidebar.selectbox("Headless Browser", [True, False], index=0)
+
+
+# # Add a selectbox for choosing between CSS and LLM
+choice = st.sidebar.selectbox("Choose between CSS or LLM", ("CSS", "LLM"))
+strategy, llm_choice, model_name = choose_strategy(choice)
+submit = st.sidebar.button("Submit")
+
 if submit:
     logger.info("Form Submitted")
     response_json = fetch_data(
-        city, query, max_price, selected_condition, headless
+        city,
+        query,
+        max_price,
+        selected_condition,
+        headless,
+        strategy,
+        llm_choice,
+        model_name,
     )
 
     if response_json:

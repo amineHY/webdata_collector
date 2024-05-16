@@ -3,11 +3,16 @@ import logging
 
 import pandas as pd
 from bs4 import BeautifulSoup
+from services.llm import get_single_post_data_using_llm
 
 logger = logging.getLogger(__name__)
 
 
-def parse_facebook_marketplace_listings(html, parsing_method="css"):
+def parse_facebook_marketplace_listings(html, param_dict):
+    strategy_param = param_dict["strategy"]
+    llm_choice_param = param_dict["llm_choice"]
+    model_name_param = param_dict["model_name"]
+
     soup = BeautifulSoup(html, "html.parser")
 
     logger.info("Getting HTML of all posts")
@@ -26,11 +31,9 @@ def parse_facebook_marketplace_listings(html, parsing_method="css"):
 
             empty_divs = find_empty_html_divs(soup_single_post)
             if empty_divs:
-                print("There are empty divs in the HTML.")
                 continue
             else:
-                print("No empty divs found in the HTML.")
-
+                pass
             logger.info(
                 "Extracting metadata from a single HTML post %d", idx + 1
             )
@@ -44,12 +47,14 @@ def parse_facebook_marketplace_listings(html, parsing_method="css"):
                 print(soup_single_post)
                 url_post = ""
 
-            if parsing_method == "llm":
+            if strategy_param == "LLM":
                 logger.info("Extracting post's data using LLM chain")
                 try:
+                    html = soup_single_post.prettify()
                     post_data = get_single_post_data_using_llm(
-                        soup_single_post
+                        html, llm_choice_param, model_name_param
                     )
+                    print(post_data)
                     title = post_data.get("title")
                     price = post_data.get("price")
                     location = post_data.get("location")
@@ -60,7 +65,7 @@ def parse_facebook_marketplace_listings(html, parsing_method="css"):
                     location = "None"
                     item_number = "None"
 
-            elif parsing_method == "css":
+            elif strategy_param == "CSS":
                 logger.info("Extracting post's data using CSS Extractor")
                 html_content = soup_single_post.prettify()
                 title, price, location, item_number = (

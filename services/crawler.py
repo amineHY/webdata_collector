@@ -5,15 +5,26 @@ from playwright.async_api import TimeoutError, async_playwright
 
 from core.logging import logger, setup_logging
 from services.parser import parse_facebook_marketplace_listings
-from utils.browser import (login_facebook, save_html, scrape_marketplace,
-                           setup_browser_context)
+from utils.browser import (
+    login_facebook,
+    save_html,
+    scrape_marketplace,
+    setup_browser_context,
+)
 from utils.misc import cities, setup_urls_facebook_marketplace
 
 logger = setup_logging()
 
 
 async def handle_crawler_request(
-    city, query, max_price, item_condition, headless
+    city,
+    query,
+    max_price,
+    item_condition,
+    headless,
+    strategy,
+    llm_choice,
+    model_name,
 ):
     logger.info("START")
     start_time = time.time()
@@ -26,6 +37,9 @@ async def handle_crawler_request(
             max_price_param=max_price,
             item_condition_param=item_condition,
             headless_param=headless,
+            strategy_param=strategy,
+            llm_choice_param=llm_choice,
+            model_name_param=model_name,
         )
 
         logger.info("END")
@@ -56,6 +70,9 @@ async def run_facebook_marketplace_crawler_and_parser(
     max_price_param,
     item_condition_param,
     headless_param,
+    strategy_param,
+    llm_choice_param,
+    model_name_param,
 ):
     logger.info("Loading cities dict")
     if city_param in cities:
@@ -67,7 +84,11 @@ async def run_facebook_marketplace_crawler_and_parser(
     url_login, url_marketplace = setup_urls_facebook_marketplace(
         query_param, max_price_param, city, item_condition_param
     )
-    filepath = "data/posts_html.html"
+    param_dict = {
+        "strategy": strategy_param,
+        "model_name": model_name_param,
+        "llm_choice": llm_choice_param,
+    }
 
     async with async_playwright() as p:
         try:
@@ -85,10 +106,11 @@ async def run_facebook_marketplace_crawler_and_parser(
             html = await scrape_marketplace(page, url_marketplace)
 
             logger.info("Saving the HTML code")
+            filepath = "data/posts_html.html"
             await save_html(html, filepath)
 
             logger.info("Parsing HTML of all posts' page")
-            df = parse_facebook_marketplace_listings(html)
+            df = parse_facebook_marketplace_listings(html, param_dict)
 
         except TimeoutError:
             logger.error("Timeout occurred during the crawling process.")
