@@ -2,7 +2,7 @@ from io import StringIO
 import pandas as pd
 import requests
 import streamlit as st
-from tools.config import cities
+from utils.misc import cities
 import logging
 import plotly.express as px
 import json
