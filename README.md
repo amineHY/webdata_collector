@@ -16,7 +16,7 @@ A simple query is sent to the backend then, the data is collected by the backend
 
 Launch the API server
 
-    uvicorn backend_api:app --reload
+    uvicorn main:app --reload
 
 ![](./assets/media/README/image_2024-05-02-23-17-59_.png)Launch the dashboard server
 
