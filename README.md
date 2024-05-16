@@ -1,4 +1,4 @@
-# Crawler and Scraper of Marketplace Post's using CSS or LLM
+# AI Crawler and Scraper of Marketplace - CSS or LLM (OpenAI)
 
 ![](assets/media/diagram.png)
 
@@ -22,4 +22,4 @@ Launch the API server
 
     streamlit run dashboard.py
 
-![](./assets/media/README/image_2024-05-15-12-14-15_.png)
+![](./assets/media/README/image_2024-05-16-22-44-35_.png)
