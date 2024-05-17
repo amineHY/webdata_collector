@@ -1,0 +1,42 @@
+= AI Crawler and Scraper of Marketplace - CSS or LLM (OpenAI)
+
+image:https://www.python.org/static/community_logos/python-logo.png[Python Logo, width=50,float="center",align="center"] 
+image:https://fastapi.tiangolo.com/img/logo-margin/logo-teal.png[FastAPI Logo, width=50,float="center",align="center"]
+image:https://media.licdn.com/dms/image/D4E12AQHQP9J275Q_uA/article-cover_image-shrink_600_2000/0/1700940849777?e=2147483647&v=beta&t=m0HEQrukIOqU4fe1K9M19PaHq3UbvEubLzeIH1shcSc[Langchain Logo, width=50,float="center",align="center"]
+image:https://streamlit.io/images/brand/streamlit-logo-primary-colormark-darktext.png[Streamlit Logo, width=50,float="center",align="center"]
+image:https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Pandas_logo.svg/2560px-Pandas_logo.svg.png[Pandas Logo, width=50,float="center",align="center"]
+image:https://th.bing.com/th/id/OIP.pTBQ0TJm6fk4mi80RWJuZgHaCl?rs=1&pid=ImgDetMain[OpenAI Logo, width=50,float="center",align="center"]
+image:https://raw.githubusercontent.com/deepset-ai/haystack-integrations/main/logos/ollama.png[ollama, width=50,float="center",align="center"]
+image:https://seeklogo.com/images/P/playwright-logo-22FA8B9E63-seeklogo.com.png[Playwright Logo, width=50,float="center",align="center"]
+
+== Architecture
+
+image::assets/media/diagram.png[]
+
+
+
+
+== Backend
+A FastAPI consist of accessing posts published in marketplace and return the data to the frontend FastAPI
+
+== Frontend
+A simple streamlit dashboard that allows the user to interact with the backend API
+A simple query is sent to the backend then, the data is collected by the backend api, crawler & scraper.
+The collected data is saved in a CSV file
+
+== Run the project
+
+Launch the API server
+....
+uvicorn main:app --reload
+....
+
+image::./assets/media/README/image_2024-05-02-23-17-59_.png[]
+
+Launch the dashboard server
+....
+streamlit run dashboard.py
+....
+
+image::./assets/media/README/image_2024-05-16-22-44-35_.png[]
+

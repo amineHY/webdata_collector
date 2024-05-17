@@ -1,0 +1,11 @@
+beautifulsoup4==4.12.3
+core==1.0.1
+fastapi==0.111.0
+langchain==0.1.20
+langchain_community==0.0.38
+langchain_core==0.1.52
+langchain_openai==0.1.7
+pandas==2.2.2
+playwright==1.40.0
+pydantic==2.7.1
+utils==1.0.2
