@@ -1,14 +1,8 @@
-from langchain.prompts import ChatPromptTemplate
-from langchain.chains import LLMChain
-from langchain.output_parsers import StructuredOutputParser, ResponseSchema
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.llms import Ollama
-from langchain_openai import ChatOpenAI
-from core.config import settings
-from pydantic import BaseModel, Field, ValidationError
 from typing import Optional
-from core.logging import logger
 
+from langchain.output_parsers import ResponseSchema, StructuredOutputParser
+from langchain.prompts import ChatPromptTemplate
+from langchain_community.llms import Ollama
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -16,22 +10,24 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field, ValidationError
+
+from core.config import settings
+from core.logging import logger
 
 
 def get_model(llm_choice_param, model_name_param):
-
     if llm_choice_param.lower() == "ollama":
         print("Using OpenAI")
-
         llm_model = Ollama(model=model_name_param)
         return llm_model
-
     elif llm_choice_param.lower() == "openai":
         llm_model = ChatOpenAI(
             api_key=settings.OPENAI_API_KEY, model=model_name_param
         )
         return llm_model
-
     else:
         raise ValueError(
             f"{model_name_param} is not a supported model name in {llm_choice_param}."
@@ -70,9 +66,6 @@ def setup_llm_chain(llm_choice_param="OpenAI", model_name_param="gpt-4"):
                 "return null for the attribute's value."
                 "Find and extract text of title, location, price, and item_number from HTML code of a Facebook marketplace post.",
             ),
-            # # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-            # MessagesPlaceholder("examples"),  # <-- EXAMPLES!
-            # # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
             ("human", "{HTML}"),
         ]
     )
