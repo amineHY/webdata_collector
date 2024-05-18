@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from services.crawler import handle_crawler_request
 from core.logging import setup_logging
-from pydantic import BaseModel
+from utils.misc import QueryParams
 
 # Initialize logger
 logger = setup_logging()
@@ -12,37 +12,24 @@ router = APIRouter()
 
 # Define a simple root endpoint for testing purposes
 @router.get("/")
-def root():
+def root() -> dict:
+    """
+    Returns a JSON response with the message "Hello, World!".
+
+    Returns:
+        dict: JSON response with the message "Hello, World!".
+    """
     return {"message": "Hello, World!"}
-
-
-# Define the query parameters using Pydantic's BaseModel
-class QueryParams(BaseModel):
-    city: str
-    query: str
-    max_price: float
-    itemCondition: str
-    headless: bool = True
-    strategy: str  # Add the strategy parameter
-    llm_choice: str  # Add the llm_choice parameter
-    model_name: str  # Add the model_name parameter
 
 
 # Define the endpoint for the crawler
 @router.get("/crawler/")
 async def crawler(params: QueryParams = Depends()):
+
     try:
         logger.info("Crawler request received with params: %s", params)
-        return await handle_crawler_request(
-            params.city,
-            params.query,
-            params.max_price,
-            params.itemCondition,
-            params.headless,
-            params.strategy,  # Pass the strategy parameter
-            params.llm_choice,  # Pass the llm_choice parameter
-            params.model_name,  # Pass the model_name parameter
-        )
+        return await handle_crawler_request(params)
+
     except Exception as e:
         logger.error("Error handling crawler request: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))

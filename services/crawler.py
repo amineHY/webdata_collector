@@ -11,35 +11,26 @@ from utils.browser import (
     scrape_marketplace,
     setup_browser_context,
 )
-from utils.misc import cities, setup_urls_facebook_marketplace
+from utils.misc import QueryParams, cities, setup_urls_facebook_marketplace
 
 logger = setup_logging()
 
 
-async def handle_crawler_request(
-    city,
-    query,
-    max_price,
-    item_condition,
-    headless,
-    strategy,
-    llm_choice,
-    model_name,
-):
+async def handle_crawler_request(params: QueryParams):
     logger.info("START")
     start_time = time.time()
 
     try:
         logger.info("Running the crawler")
         df_crawler = await run_facebook_marketplace_crawler_and_parser(
-            city_param=city,
-            query_param=query,
-            max_price_param=max_price,
-            item_condition_param=item_condition,
-            headless_param=headless,
-            strategy_param=strategy,
-            llm_choice_param=llm_choice,
-            model_name_param=model_name,
+            city_param=params.city,
+            query_param=params.query,
+            max_price_param=params.max_price,
+            item_condition_param=params.itemCondition,
+            headless_param=params.headless,
+            strategy_param=params.strategy,
+            llm_choice_param=params.llm_choice,
+            model_name_param=params.model_name,
         )
 
         logger.info("END")
@@ -89,7 +80,6 @@ async def run_facebook_marketplace_crawler_and_parser(
         "model_name": model_name_param,
         "llm_choice": llm_choice_param,
     }
-
     async with async_playwright() as p:
         try:
             logger.info("Setup browser and context (Playwright)")

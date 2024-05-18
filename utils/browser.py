@@ -1,22 +1,40 @@
-from playwright.async_api import async_playwright, Page
+import playwright
+import asyncio
+
+from playwright.async_api import Page
+
 from core.config import settings
 from core.logging import setup_logging
-import asyncio
 
 logger = setup_logging()
 
 
 async def setup_browser_context(playwright, headless):
-    print(headless)
-    browser = await playwright.chromium.launch(
-        headless=headless,
-        args=["--disable-blink-features=AutomationControlled"],
-    )
-    context = await browser.new_context(
-        locale="en-US",  # Setting the browser language to English
-    )
-    context.set_default_timeout(60000)
-    return browser, context
+    """
+    Set up a browser context using Playwright.
+
+    Args:
+        playwright (Playwright): The Playwright instance.
+        headless (bool): Whether to run the browser in headless mode.
+
+    Returns:
+        Tuple: A tuple containing the browser and context objects.
+    """
+    try:
+        if not isinstance(headless, bool):
+            raise TypeError("headless must be a boolean value")
+
+        browser = await playwright.webkit.launch(
+            headless=headless,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = await browser.new_context(
+            locale="en-US",  # Setting the browser language to English
+        )
+        return browser, context
+    except Exception as e:
+        print(f"An error occurred during browser context setup: {e}")
+        raise
 
 
 async def handle_cookies_popup(page, button_txt, headless):
