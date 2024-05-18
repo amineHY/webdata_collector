@@ -18,17 +18,25 @@ The collected data is saved in a CSV file
 
 == ✅ Run the project
 
-Launch the API server
-....
-uvicorn main:app --reload
-....
+
+=== Launch the API server:
+
+You need to run the FastAPI server using Uvicorn, a lightning-fast ASGI server. You can do this by executing the following command in your terminal:
+
+    uvicorn main:app --reload
+
+This command will start the FastAPI application defined in the main.py file with hot reloading enabled, which is useful during development as it automatically reloads your application when code changes.
 
 image::./assets/media/README/image_2024-05-02-23-17-59_.png[]
 
-Launch the dashboard server
-....
-streamlit run dashboard.py
-....
+=== Launch the dashboard server:
+
+To run the Streamlit dashboard, use the following command:
+
+    streamlit run dashboard.py
+
+This command starts the Streamlit server with the dashboard defined in dashboard.py, allowing you to interact with the backend API through a user-friendly interface.
+
 
 image::./assets/media/README/image_2024-05-16-22-44-35_.png[]
 
