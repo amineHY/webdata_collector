@@ -25,7 +25,9 @@ def get_model(llm_choice_param, model_name_param):
         return llm_model
     elif llm_choice_param.lower() == "openai":
         llm_model = ChatOpenAI(
-            api_key=settings.OPENAI_API_KEY, model=model_name_param
+            api_key=settings.OPENAI_API_KEY,
+            model=model_name_param,
+            temperature=0,
         )
         return llm_model
     else:
