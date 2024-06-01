@@ -1,4 +1,4 @@
-= AI Crawler and Scraper of Marketplace - CSS or LLM (OpenAI)
+= 🌟 AI Crawler and Scraper of Marketplace - CSS or LLM (OpenAI)
 
 image::./assets/media/README/image_2024-05-17-13-59-45_.png[]
 
@@ -16,7 +16,7 @@ A simple streamlit dashboard that allows the user to interact with the backend A
 A simple query is sent to the backend then, the data is collected by the backend api, crawler & scraper.
 The collected data is saved in a CSV file
 
-== ✅ Run the project
+== 🧑‍🔬 Run the project
 
 
 === Launch the API server:
@@ -40,3 +40,18 @@ This command starts the Streamlit server with the dashboard defined in dashboard
 
 image::./assets/media/README/image_2024-05-16-22-44-35_.png[]
 
+
+
+== 🖥️ Installation
+=== Create and activate a virtual environnement
+
+    python3 -m venv myenv
+    source myenv/bin/activate
+
+=== Install python libraries
+
+    pip install requirements.txt
+
+=== Install playwright
+
+    playwright install
