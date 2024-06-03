@@ -1,9 +1,10 @@
 import datetime
 import logging
-
+import asyncio
 import pandas as pd
 from bs4 import BeautifulSoup
 from services.llm import get_single_post_data_using_llm
+from rich import print
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def parse_facebook_marketplace_listings(html, param_dict):
                     post_data = get_single_post_data_using_llm(
                         html, llm_choice_param, model_name_param
                     )
+                    asyncio.sleep(2)
                     print(post_data)
                     title = post_data.get("title")
                     price = post_data.get("price")

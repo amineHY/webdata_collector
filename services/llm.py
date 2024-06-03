@@ -1,18 +1,10 @@
 from typing import Optional
 
-from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 from langchain.prompts import ChatPromptTemplate
 from langchain_community.llms import Ollama
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from core.config import settings
 from core.logging import logger
@@ -20,7 +12,6 @@ from core.logging import logger
 
 def get_model(llm_choice_param, model_name_param):
     if llm_choice_param.lower() == "ollama":
-        print("Using OpenAI")
         llm_model = Ollama(model=model_name_param)
         return llm_model
     elif llm_choice_param.lower() == "openai":
@@ -72,7 +63,9 @@ def setup_llm_chain(llm_choice_param="OpenAI", model_name_param="gpt-4"):
         ]
     )
 
-    logger.info(f"Loading LLM Model : {llm_choice_param}, {model_name_param}")
+    logger.info(
+        f"Loading LLM Model : {llm_choice_param.lower()}, {model_name_param}"
+    )
     llm_model = get_model(llm_choice_param, model_name_param)
     chain = llm_prompt | llm_model.with_structured_output(schema=Post)
 
@@ -80,6 +73,18 @@ def setup_llm_chain(llm_choice_param="OpenAI", model_name_param="gpt-4"):
 
 
 def get_single_post_data_using_llm(html, llm_choice_param, model_name_param):
+    """
+    Get data from a single post using a Language Model (LLM).
+
+    Parameters:
+    - html (str): The HTML code of a Facebook marketplace post.
+    - llm_choice_param (str): The choice of LLM to use (e.g. "OpenAI").
+    - model_name_param (str): The name of the LLM model to use (e.g. "gpt-4").
+
+    Returns:
+    - dict: Extracted data from the post including title, location, price, and item number.
+
+    """
     logger.info("Setup LLM")
     chain = setup_llm_chain(llm_choice_param, model_name_param)
 
