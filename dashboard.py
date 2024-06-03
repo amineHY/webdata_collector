@@ -71,21 +71,21 @@ st.header("Facebook Marketplace")
 supported_cities = list(cities.keys())
 
 # Sidebar user inputs
-st.sidebar.title("Search Parameters")
+st.sidebar.title("Search options")
 city = st.sidebar.selectbox("City", supported_cities, 0)
 query = st.sidebar.text_input("Product Name", "Macbook Pro")
 max_price = st.sidebar.text_input("Max Price", "1000")
 selected_condition = st.sidebar.selectbox(
     "Condition", ["new", "used_like_new", "used_good", "used_fair"], index=1
 )
-st.sidebar.header("Scraping Parameters")
 
-headless = st.sidebar.selectbox("Headless Browser", [True, False], index=0)
+# Create an expander for the sidebar menu
+with st.sidebar.expander("Parameters", expanded=True):
+    headless = st.selectbox("Headless Browser", [True, False], index=0)
+    choice = st.selectbox("Choose between CSS or LLM", ("CSS", "LLM"))
+    # You would need to define your choose_strategy function
+    strategy, llm_choice, model_name = choose_strategy(choice)
 
-
-# # Add a selectbox for choosing between CSS and LLM
-choice = st.sidebar.selectbox("Choose between CSS or LLM", ("CSS", "LLM"))
-strategy, llm_choice, model_name = choose_strategy(choice)
 submit = st.sidebar.button("Submit")
 
 if submit:
